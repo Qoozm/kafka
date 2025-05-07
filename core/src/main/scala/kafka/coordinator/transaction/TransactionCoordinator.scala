@@ -27,7 +27,7 @@ import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.record.RecordBatch
 import org.apache.kafka.common.requests.{AddPartitionsToTxnResponse, TransactionResult}
 import org.apache.kafka.common.utils.{LogContext, ProducerIdAndEpoch, Time}
-import org.apache.kafka.coordinator.transaction.ProducerIdManager
+import org.apache.kafka.coordinator.transaction.{ProducerIdManager, TransactionLogConfig, TransactionStateManagerConfig}
 import org.apache.kafka.metadata.MetadataCache
 import org.apache.kafka.server.common.{RequestLocal, TransactionVersion}
 import org.apache.kafka.server.util.Scheduler
@@ -46,16 +46,18 @@ object TransactionCoordinator {
             metadataCache: MetadataCache,
             time: Time): TransactionCoordinator = {
 
-    val txnConfig = TransactionConfig(config.transactionStateManagerConfig.transactionalIdExpirationMs,
-      config.transactionStateManagerConfig.transactionMaxTimeoutMs,
-      config.transactionLogConfig.transactionTopicPartitions,
-      config.transactionLogConfig.transactionTopicReplicationFactor,
-      config.transactionLogConfig.transactionTopicSegmentBytes,
-      config.transactionLogConfig.transactionLoadBufferSize,
-      config.transactionLogConfig.transactionTopicMinISR,
-      config.transactionStateManagerConfig.transactionAbortTimedOutTransactionCleanupIntervalMs,
-      config.transactionStateManagerConfig.transactionRemoveExpiredTransactionalIdCleanupIntervalMs,
-      config.transactionStateManagerConfig.transaction2PCEnabled,
+    val transactionLogConfig = new TransactionLogConfig(config)
+    val transactionStateManagerConfig = new TransactionStateManagerConfig(config)
+    val txnConfig = TransactionConfig(transactionStateManagerConfig.transactionalIdExpirationMs,
+      transactionStateManagerConfig.transactionMaxTimeoutMs,
+      transactionLogConfig.transactionTopicPartitions,
+      transactionLogConfig.transactionTopicReplicationFactor,
+      transactionLogConfig.transactionTopicSegmentBytes,
+      transactionLogConfig.transactionLoadBufferSize,
+      transactionLogConfig.transactionTopicMinISR,
+      transactionStateManagerConfig.transactionAbortTimedOutTransactionCleanupIntervalMs,
+      transactionStateManagerConfig.transactionRemoveExpiredTransactionalIdCleanupIntervalMs,
+      transactionStateManagerConfig.transaction2PCEnabled,
       config.requestTimeoutMs)
 
     val txnStateManager = new TransactionStateManager(config.brokerId, scheduler, replicaManager, metadataCache, txnConfig,
@@ -292,12 +294,13 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
   def handleListTransactions(
     filteredProducerIds: Set[Long],
     filteredStates: Set[String],
-    filteredDuration: Long = -1L
+    filteredDuration: Long = -1L,
+    filteredTransactionalIdPattern: String = null
   ): ListTransactionsResponseData = {
     if (!isActive.get()) {
       new ListTransactionsResponseData().setErrorCode(Errors.COORDINATOR_NOT_AVAILABLE.code)
     } else {
-      txnManager.listTransactionStates(filteredProducerIds, filteredStates, filteredDuration)
+      txnManager.listTransactionStates(filteredProducerIds, filteredStates, filteredDuration, filteredTransactionalIdPattern)
     }
   }
 
