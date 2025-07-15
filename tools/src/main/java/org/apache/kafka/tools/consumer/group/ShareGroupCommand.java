@@ -153,9 +153,8 @@ public class ShareGroupCommand {
 
         List<String> listShareGroups() {
             try {
-                ListGroupsResult result = adminClient.listGroups(new ListGroupsOptions()
-                    .timeoutMs(opts.options.valueOf(opts.timeoutMsOpt).intValue())
-                    .withTypes(Set.of(GroupType.SHARE)));
+                ListGroupsResult result = adminClient.listGroups(ListGroupsOptions.forShareGroups()
+                    .timeoutMs(opts.options.valueOf(opts.timeoutMsOpt).intValue()));
                 Collection<GroupListing> listings = result.all().get();
                 return listings.stream().map(GroupListing::groupId).collect(Collectors.toList());
             } catch (InterruptedException | ExecutionException e) {
@@ -165,9 +164,8 @@ public class ShareGroupCommand {
 
         List<GroupListing> listDetailedShareGroups() {
             try {
-                ListGroupsResult result = adminClient.listGroups(new ListGroupsOptions()
-                    .timeoutMs(opts.options.valueOf(opts.timeoutMsOpt).intValue())
-                    .withTypes(Set.of(GroupType.SHARE)));
+                ListGroupsResult result = adminClient.listGroups(ListGroupsOptions.forShareGroups()
+                    .timeoutMs(opts.options.valueOf(opts.timeoutMsOpt).intValue()));
                 Collection<GroupListing> listings = result.all().get();
                 return listings.stream().toList();
             } catch (InterruptedException | ExecutionException e) {
@@ -176,9 +174,8 @@ public class ShareGroupCommand {
         }
 
         List<GroupListing> listShareGroupsInStates(Set<GroupState> states) throws ExecutionException, InterruptedException {
-            ListGroupsResult result = adminClient.listGroups(new ListGroupsOptions()
+            ListGroupsResult result = adminClient.listGroups(ListGroupsOptions.forShareGroups()
                 .timeoutMs(opts.options.valueOf(opts.timeoutMsOpt).intValue())
-                .withTypes(Set.of(GroupType.SHARE))
                 .inGroupStates(states));
             return new ArrayList<>(result.all().get());
         }
@@ -279,10 +276,10 @@ public class ShareGroupCommand {
                 System.out.println("Deletion of requested share groups (" + success.keySet().stream().map(group -> "'" + group + "'").collect(Collectors.joining(", ")) + ") was successful.");
             else {
                 printError("Deletion of some share groups failed:", Optional.empty());
-                failed.forEach((group, error) -> System.out.println("* Share group '" + group + "' could not be deleted due to: " + error));
+                failed.forEach((group, error) -> System.out.println("* Group '" + group + "' could not be deleted due to: " + error));
 
                 if (!success.isEmpty())
-                    System.out.println("\nThese share groups were deleted successfully: " + success.keySet().stream().map(group -> "'" + group + "'").collect(Collectors.joining(",")));
+                    System.out.println("\nThese share groups were deleted successfully: " + success.keySet().stream().map(group -> "'" + group + "'").collect(Collectors.joining(", ")));
             }
 
             failed.putAll(success);

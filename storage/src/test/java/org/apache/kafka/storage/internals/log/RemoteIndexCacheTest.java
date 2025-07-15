@@ -19,6 +19,7 @@ package org.apache.kafka.storage.internals.log;
 import org.apache.kafka.common.TopicIdPartition;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.test.api.Flaky;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentId;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata;
@@ -329,6 +330,18 @@ public class RemoteIndexCacheTest {
         verify(cacheEntry.timeIndex()).renameTo(any(File.class));
         verify(cacheEntry.offsetIndex()).renameTo(any(File.class));
         verify(cacheEntry.txnIndex()).renameTo(any(File.class));
+
+        // wait until the delete method is invoked
+        TestUtils.waitForCondition(() -> {
+            try {
+                verify(cacheEntry.timeIndex()).deleteIfExists();
+                verify(cacheEntry.offsetIndex()).deleteIfExists();
+                verify(cacheEntry.txnIndex()).deleteIfExists();
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }, "Failed to delete index file");
 
         // verify no index files on disk
         assertFalse(getIndexFileFromRemoteCacheDir(cache, LogFileUtils.INDEX_FILE_SUFFIX).isPresent(),
@@ -760,6 +773,7 @@ public class RemoteIndexCacheTest {
     }
 
     @Test
+    @Flaky("KAFKA-19286")
     public void testConcurrentRemoveReadForCache1() throws IOException, InterruptedException, ExecutionException {
         // Create a spy Cache Entry
         RemoteIndexCache.Entry spyEntry = generateSpyCacheEntry();
