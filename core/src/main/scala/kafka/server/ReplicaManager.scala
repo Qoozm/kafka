@@ -501,8 +501,13 @@ class ReplicaManager(val config: KafkaConfig,
   // Visible for testing
   def createPartition(topicPartition: TopicPartition): Partition = {
     val partition = Partition(topicPartition, time, this)
-    allPartitions.put(topicPartition, HostedPartition.Online(partition))
+    addOnlinePartition(topicPartition, partition)
     partition
+  }
+
+  // Visible for testing
+  private[server] def addOnlinePartition(topicPartition: TopicPartition, partition: Partition): Unit = {
+    allPartitions.put(topicPartition, HostedPartition.Online(partition))
   }
 
   def onlinePartition(topicPartition: TopicPartition): Option[Partition] = {
@@ -783,7 +788,11 @@ class ReplicaManager(val config: KafkaConfig,
             hasCustomErrorMessage = customException.isDefined
           )
       }
-      val entriesWithoutErrorsPerPartition = entriesPerPartition.filter { case (key, _) => !errorResults.contains(key) }
+      // In non-transaction paths, errorResults is typically empty, so we can 
+      // directly use entriesPerPartition instead of creating a new filtered collection
+      val entriesWithoutErrorsPerPartition = 
+        if (errorResults.nonEmpty) entriesPerPartition.filter { case (key, _) => !errorResults.contains(key) }
+        else entriesPerPartition
 
       val preAppendPartitionResponses = buildProducePartitionStatus(errorResults).map { case (k, status) => k -> status.responseStatus }
 
@@ -1149,7 +1158,15 @@ class ReplicaManager(val config: KafkaConfig,
               // Stop current replica movement if the destinationDir is different from the existing destination log directory
               if (partition.futureReplicaDirChanged(destinationDir)) {
                 replicaAlterLogDirsManager.removeFetcherForPartitions(Set(topicPartition))
+                // There's a chance that the future replica can be promoted between the check for futureReplicaDirChanged
+                // and call to removeFetcherForPartitions. We want to avoid resuming cleaning again in that case to avoid
+                // an IllegalStateException. The presence of a future log after the call to removeFetcherForPartitions
+                // implies that it has not been promoted as both synchronize on partitionMapLock.
+                val futureReplicaPromoted = partition.futureLog.isEmpty
                 partition.removeFutureLocalReplica()
+                if (!futureReplicaPromoted) {
+                  logManager.resumeCleaning(topicPartition)
+                }
               }
             case HostedPartition.Offline(_) =>
               throw new KafkaStorageException(s"Partition $topicPartition is offline")
@@ -2396,9 +2413,8 @@ class ReplicaManager(val config: KafkaConfig,
     localLeaders.foreachEntry { (tp, info) =>
       getOrCreatePartition(tp, delta, info.topicId).foreach { case (partition, isNew) =>
         try {
-          val state = info.partition.toLeaderAndIsrPartitionState(tp, isNew)
           val partitionAssignedDirectoryId = directoryIds.find(_._1.topicPartition() == tp).map(_._2)
-          partition.makeLeader(state, offsetCheckpoints, Some(info.topicId), partitionAssignedDirectoryId)
+          partition.makeLeader(info.partition, isNew, offsetCheckpoints, Some(info.topicId), partitionAssignedDirectoryId)
 
           changedPartitions.add(partition)
         } catch {
@@ -2438,9 +2454,8 @@ class ReplicaManager(val config: KafkaConfig,
           // - This also ensures that the local replica is created even if the leader
           //   is unavailable. This is required to ensure that we include the partition's
           //   high watermark in the checkpoint file (see KAFKA-1647).
-          val state = info.partition.toLeaderAndIsrPartitionState(tp, isNew)
           val partitionAssignedDirectoryId = directoryIds.find(_._1.topicPartition() == tp).map(_._2)
-          val isNewLeaderEpoch = partition.makeFollower(state, offsetCheckpoints, Some(info.topicId), partitionAssignedDirectoryId)
+          val isNewLeaderEpoch = partition.makeFollower(info.partition, isNew, offsetCheckpoints, Some(info.topicId), partitionAssignedDirectoryId)
 
           if (isInControlledShutdown && (info.partition.leader == NO_LEADER ||
               !info.partition.isr.contains(config.brokerId))) {
